@@ -117,8 +117,23 @@ class DocumentExtractor:
         if photos_dir:
             self.photos_dir = os.path.abspath(photos_dir)
         else:
-            self.photos_dir = os.path.abspath(os.path.join(os.path.dirname(self.nominal_dir), "student_photos"))
-        os.makedirs(self.photos_dir, exist_ok=True)
+            candidates = [
+                os.path.abspath(os.path.join(os.path.dirname(self.nominal_dir), "student_photos")),
+                os.path.abspath(os.path.join(os.path.dirname(__file__), "student_photos")),
+                os.path.abspath("student_photos")
+            ]
+            self.photos_dir = candidates[0]
+            for cand in candidates:
+                if os.path.exists(cand):
+                    self.photos_dir = cand
+                    break
+
+        try:
+            os.makedirs(self.photos_dir, exist_ok=True)
+        except OSError:
+            import tempfile
+            self.photos_dir = os.path.join(tempfile.gettempdir(), "student_photos")
+            os.makedirs(self.photos_dir, exist_ok=True)
 
     def scan_all_files(self) -> Tuple[List[StudentRecord], List[FileProcessResult]]:
         if not os.path.exists(self.nominal_dir):
@@ -697,14 +712,29 @@ class DocumentExtractor:
             photo_filename = f"{record_id}.jpg"
             photo_path = os.path.join(self.photos_dir, photo_filename)
             try:
-                with open(photo_path, "wb") as pf:
-                    pf.write(photo_bytes)
+                if not os.path.exists(photo_path):
+                    with open(photo_path, "wb") as pf:
+                        pf.write(photo_bytes)
                 photo_url = f"/api/photos/{photo_filename}"
                 has_photo = True
                 all_fields['Photograph Status'] = 'Extracted from Nominal Roll (Verified)'
             except Exception as e:
-                logger.warning(f"Could not save student photo for {record_id}: {e}")
-                photo_status = "none"
+                import tempfile
+                fallback_dir = os.path.join(tempfile.gettempdir(), "student_photos")
+                os.makedirs(fallback_dir, exist_ok=True)
+                self.photos_dir = fallback_dir
+                fallback_path = os.path.join(fallback_dir, photo_filename)
+                try:
+                    if not os.path.exists(fallback_path):
+                        with open(fallback_path, "wb") as pf:
+                            pf.write(photo_bytes)
+                    photo_path = fallback_path
+                    photo_url = f"/api/photos/{photo_filename}"
+                    has_photo = True
+                    all_fields['Photograph Status'] = 'Extracted from Nominal Roll (Verified)'
+                except Exception as ex:
+                    logger.warning(f"Could not save student photo for {record_id}: {ex}")
+                    photo_status = "none"
 
         return StudentRecord(
             id=record_id,

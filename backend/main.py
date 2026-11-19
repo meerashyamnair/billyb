@@ -16,8 +16,8 @@ CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(CURRENT_DIR)
 
 CANDIDATE_PATHS = [
-    os.path.join(PROJECT_ROOT, "nominal_roll"),
     os.path.join(CURRENT_DIR, "nominal_roll"),
+    os.path.join(PROJECT_ROOT, "nominal_roll"),
     os.path.abspath("nominal_roll")
 ]
 
@@ -42,7 +42,10 @@ app = FastAPI(
     title="Student Nominal Roll Search Portal API",
     description="Automated Nominal Roll Extraction, Search and Verification System",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/api/docs",
+    redoc_url="/api/redoc",
+    openapi_url="/api/openapi.json"
 )
 
 # Enable CORS
@@ -53,6 +56,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.get("/api")
+@app.get("/api/")
+def api_root():
+    return {
+        "service": "Student Nominal Roll Search Portal API",
+        "status": "online",
+        "docs": "/api/docs",
+        "health": "/api/health",
+        "indexed_records": len(storage.records)
+    }
 
 @app.get("/api/health")
 def health_check():
@@ -104,18 +118,27 @@ def get_student_details(student_id: str):
 
 @app.get("/api/photos/{filename}")
 def get_student_photo(filename: str):
+    import tempfile
     safe_filename = os.path.basename(filename)
-    photos_dir = storage.extractor.photos_dir
-    file_path = os.path.join(photos_dir, safe_filename)
-    if not os.path.exists(file_path):
+    candidates = [
+        os.path.join(storage.extractor.photos_dir, safe_filename),
+        os.path.join(CURRENT_DIR, "student_photos", safe_filename),
+        os.path.join(PROJECT_ROOT, "student_photos", safe_filename),
+        os.path.join(tempfile.gettempdir(), "student_photos", safe_filename)
+    ]
+    file_path = None
+    for cand in candidates:
+        if os.path.exists(cand):
+            file_path = cand
+            break
         if not safe_filename.endswith(".jpg"):
-            alt_path = os.path.join(photos_dir, f"{safe_filename}.jpg")
-            if os.path.exists(alt_path):
-                file_path = alt_path
-            else:
-                raise HTTPException(status_code=404, detail="Student photograph not found.")
-        else:
-            raise HTTPException(status_code=404, detail="Student photograph not found.")
+            alt = f"{cand}.jpg"
+            if os.path.exists(alt):
+                file_path = alt
+                break
+
+    if not file_path:
+        raise HTTPException(status_code=404, detail="Student photograph not found.")
 
     return FileResponse(file_path, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=86400"})
 
